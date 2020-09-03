@@ -17,7 +17,7 @@ from complaint_search.es_builders import (
     TrendsAggregationBuilder,
 )
 from complaint_search.export import ElasticSearchExporter
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch2 import Elasticsearch, helpers
 from flags.state import flag_enabled
 
 

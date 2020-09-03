@@ -3,7 +3,7 @@ from django.test import TestCase
 import mock
 from complaint_search.es_interface import trends
 from complaint_search.tests.es_interface_test_helpers import load
-from elasticsearch import Elasticsearch
+from elasticsearch2 import Elasticsearch
 
 
 class EsInterfaceTest_Trends(TestCase):

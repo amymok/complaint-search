@@ -6,7 +6,7 @@ from complaint_search.tests.es_interface_test_helpers import (
     assertBodyEqual,
     load,
 )
-from elasticsearch import Elasticsearch
+from elasticsearch2 import Elasticsearch
 
 
 class EsInterfaceTest_States(TestCase):

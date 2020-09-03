@@ -49,7 +49,7 @@ install_requires = [
     'djangorestframework>=3.9.1,<4.0',
     'django-rest-swagger>=2.2.0',
     'requests>=2.18,<3',
-    'elasticsearch>=2.4.1,<3',
+    'elasticsearch2>=2.4.1,<3',
     'django-localflavor>=1.1,<3.1',
     'django-flags>=4.0.1,<5.1',
 ]
