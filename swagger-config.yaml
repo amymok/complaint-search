@@ -321,7 +321,7 @@ components:
     date_received_max:
       name: date_received_max
       in: query
-      description: Return results with date <= date_received_max (i.e. 2017-03-04)
+      description: Return results with date < date_received_max (i.e. 2017-03-04)
       schema:
         type: string
         format: date
