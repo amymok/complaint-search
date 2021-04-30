@@ -7,6 +7,7 @@ from complaint_search.defaults import (
     CSV_ORDERED_HEADERS,
     EXPORT_FORMATS,
     PARAMS,
+    SOURCE_FIELDS,
 )
 from complaint_search.es_builders import (
     AggregationBuilder,
@@ -17,8 +18,9 @@ from complaint_search.es_builders import (
     TrendsAggregationBuilder,
 )
 from complaint_search.export import ElasticSearchExporter
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch7 import Elasticsearch, RequestsHttpConnection, helpers
 from flags.state import flag_enabled
+from requests_aws4auth import AWS4Auth
 
 
 _ES_URL = "{}://{}:{}".format("http", os.environ.get('ES_HOST', 'localhost'),
@@ -27,6 +29,15 @@ _ES_USER = os.environ.get('ES_USER', '')
 _ES_PASSWORD = os.environ.get('ES_PASSWORD', '')
 
 _ES_INSTANCE = None
+
+USE_AWS_ES = os.environ.get('USE_AWS_ES', False)
+AWS_ES_ACCESS_KEY = os.environ.get('AWS_ES_ACCESS_KEY')
+AWS_ES_SECRET_KEY = os.environ.get('AWS_ES_SECRET_KEY')
+# The below was configured because of a naming convention chosen by
+# CF.gov for ES7 Host. May require changing if var name changed
+# https://github.com/cfpb/consumerfinance.gov/blob/main/.env_SAMPLE#L92
+AWS_ES_HOST = os.environ.get('ES7_HOST')
+
 
 _COMPLAINT_ES_INDEX = os.environ.get('COMPLAINT_ES_INDEX', 'complaint-index')
 _COMPLAINT_DOC_TYPE = os.environ.get('COMPLAINT_DOC_TYPE', 'complaint-doctype')
@@ -110,11 +121,28 @@ def process_trends_response(response):
 def _get_es():
     global _ES_INSTANCE
     if _ES_INSTANCE is None:
-        _ES_INSTANCE = Elasticsearch(
-            [_ES_URL],
-            http_auth=(_ES_USER, _ES_PASSWORD),
-            timeout=100
-        )
+        if USE_AWS_ES:
+            awsauth = AWS4Auth(
+                AWS_ES_ACCESS_KEY,
+                AWS_ES_SECRET_KEY,
+                'us-east-1',
+                'es'
+            )
+            _ES_INSTANCE = Elasticsearch(
+                hosts=[{'host': AWS_ES_HOST, 'port': 443}],
+                http_auth=awsauth,
+                use_ssl=True,
+                verify_certs=True,
+                connection_class=RequestsHttpConnection,
+                timeout=100
+            )
+        else:
+            _ES_INSTANCE = Elasticsearch(
+                [_ES_URL],
+                http_auth=(_ES_USER, _ES_PASSWORD),
+                timeout=100
+            )
+    # logger.info(_ES_INSTANCE)
     return _ES_INSTANCE
 
 
@@ -180,8 +208,7 @@ def _get_meta():
     }
     max_date_res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=body)
     count_res = _get_es().count(
-        index=_COMPLAINT_ES_INDEX,
-        doc_type=_COMPLAINT_DOC_TYPE
+        index=_COMPLAINT_ES_INDEX
     )
 
     result = {
@@ -202,41 +229,24 @@ def _get_meta():
 
     return result
 
-# List of possible arguments:
-# - format: format to be returned: "json", "csv"
-# - field: field you want to search in: "complaint_what_happened",
-#   "company_public_response", "_all"
-# - size: number of complaints to return
-# - frm: from which index to start returning
-# - sort: sort by: "relevance_desc", "relevance_asc", "created_date_desc",
-#   "created_date_asc"
-# - search_term: the term to be searched
-# - date_received_min: return only date received including and later than this
-#   date i.e. 2017-03-02
-# - date_received_max: return only date received before this date, i.e.
-#   2017-04-12
-# - company_received_min: return only date company received including and later
-#   than this date i.e. 2017-03-02
-# - company_received_max: return only date company received before this date,
-#   i.e. 2017-04-12
-# - company: filters a list of companies you want ["Bank 1", "Bank 2"]
-# - product: filters a list of product you want if a subproduct is needed to
-#   filter, separated by a bullet (u'\u2022), i.e.
-#   [u"Mortgage\u2022FHA Mortgage", "Payday Loan"]
-# - issue: filters a list of issue you want if a subissue is needed to filter,
-#   separated by a bullet (u'\u2022), i.e. See Product above
-# - state: filters a list of states you want
-# - zip_code: filters a list of zipcodes you want
-# - timely: filters a list of whether the company responds in a timely matter
-#   or not
-# - consumer_disputed: filters a list of dispute resolution
-# - company_response: filters a list of response from the company to consumer
-# - company_public_response: filters a list of public response from the company
-# - consumer_consent_provided: filters a list of whether consumer consent was
-#   provided in the complaint
-# - has_narrative: filters a list of whether complaint has narratives or not
-# - submitted_via: filters a list of ways the complaint was submitted
-# - tags - filters a list of tags
+
+def _extract_total(response):
+    total_obj = response['hits'].get('total')
+    if not total_obj:
+        return None
+
+    # ES7: Less than 10K hits with return an exact value
+    if total_obj['relation'] == 'eq':
+        return total_obj['value']
+
+    # ES7: more than 10K hits is no accurately reported, go find it
+    aggs = response.get('aggregations', {})
+    for field in SOURCE_FIELDS:
+        doc_count = aggs.get(field, {}).get('doc_count', -1)
+        if doc_count != -1:
+            return doc_count
+
+    return None
 
 
 def search(agg_exclude=None, **kwargs):
@@ -251,8 +261,8 @@ def search(agg_exclude=None, **kwargs):
 
     log = logging.getLogger(__name__)
     log.info(
-        'Calling %s/%s/%s/_search with %s',
-        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body
+        'Calling %s/%s/_search with %s',
+        _ES_URL, _COMPLAINT_ES_INDEX, body
     )
 
     # format
@@ -270,9 +280,8 @@ def search(agg_exclude=None, **kwargs):
             body["aggs"] = aggregation_builder.build()
 
         res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                               doc_type=_COMPLAINT_DOC_TYPE,
                                body=body,
-                               scroll="10m")
+                               scroll="10m" if body['size'] else None)
 
         if res['hits']['hits']:
             num_of_scroll = params.get("frm") / body["size"]
@@ -286,6 +295,9 @@ def search(agg_exclude=None, **kwargs):
                     num_of_scroll -= 1
         res["_meta"] = _get_meta()
 
+        # Replicate the v2.3 total
+        res['hits']['total'] = _extract_total(res)
+
     elif format in EXPORT_FORMATS:
         scanResponse = helpers.scan(
             client=_get_es(),
@@ -293,7 +305,6 @@ def search(agg_exclude=None, **kwargs):
             scroll="10m",
             index=_COMPLAINT_ES_INDEX,
             size=7000,
-            doc_type=_COMPLAINT_DOC_TYPE,
             request_timeout=3000
         )
 
@@ -310,7 +321,6 @@ def search(agg_exclude=None, **kwargs):
             body['size'] = 0
 
             res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                   doc_type=_COMPLAINT_DOC_TYPE,
                                    body=body,
                                    scroll="10m")
             res = exporter.export_json(scanResponse, res['hits']['total'])
@@ -321,11 +331,19 @@ def search(agg_exclude=None, **kwargs):
 def suggest(text=None, size=6):
     if text is None:
         return []
-    body = {"sgg": {"text": text, "completion": {
-        "field": "suggest", "size": size}}}
+    body = {
+        "_source": False,
+        "suggest": {
+            "sgg": {
+                "text": text,
+                "completion": {
+                    "field": "typeahead_dropdown",
+                    "skip_duplicates": True,
+                    "size": size
+                }}}}
 
-    res = _get_es().suggest(index=_COMPLAINT_ES_INDEX, body=body)
-    candidates = [e['text'] for e in res['sgg'][0]['options']]
+    res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=body)
+    candidates = [e['text'] for e in res['suggest']['sgg'][0]['options']]
     return candidates
 
 
@@ -368,7 +386,6 @@ def filter_suggest(filterField, display_field=None, **kwargs):
     # format
     res = _get_es().search(
         index=_COMPLAINT_ES_INDEX,
-        doc_type=_COMPLAINT_DOC_TYPE,
         body=body
     )
     # reformat the return
@@ -382,15 +399,14 @@ def filter_suggest(filterField, display_field=None, **kwargs):
 
 def document(complaint_id):
     doc_query = {"query": {"term": {"_id": complaint_id}}}
-    res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                           doc_type=_COMPLAINT_DOC_TYPE, body=doc_query)
+    res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=doc_query)
     return res
 
 
 def states_agg(agg_exclude=None, **kwargs):
     params = copy.deepcopy(PARAMS)
     params.update(**kwargs)
-    params.update({'size': 0})
+    params.update({'size': 500})
     search_builder = SearchBuilder()
     search_builder.add(**params)
     body = search_builder.build()
@@ -398,8 +414,10 @@ def states_agg(agg_exclude=None, **kwargs):
     log = logging.getLogger(__name__)
     log.info(
         'Calling %s/%s/%s/states with %s',
-        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body
+        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body,
     )
+    log.info(
+        'Params are %s', params)
 
     aggregation_builder = StateAggregationBuilder()
     aggregation_builder.add(**params)
@@ -408,9 +426,7 @@ def states_agg(agg_exclude=None, **kwargs):
     body["aggs"] = aggregation_builder.build()
 
     res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                           doc_type=_COMPLAINT_DOC_TYPE,
-                           body=body,
-                           scroll="10m")
+                           body=body)
 
     return res
 
@@ -432,32 +448,27 @@ def trends(agg_exclude=None, **kwargs):
     body["aggs"] = aggregation_builder.build()
 
     res_trends = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                  doc_type=_COMPLAINT_DOC_TYPE,
                                   body=body)
 
     res_date_buckets = None
 
     date_bucket_body = copy.deepcopy(body)
     date_bucket_body['query'] = {
-        "query_string": {
-            "query": "*",
-            "fields": [
-                "_all"
-            ],
-            "default_operator": "AND"
-        }
+        "match_all": {} 
     }
+    
 
     date_range_buckets_builder = DateRangeBucketsBuilder()
     date_range_buckets_builder.add(**params)
     date_bucket_body['aggs'] = date_range_buckets_builder.build()
 
     res_date_buckets = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                        doc_type=_COMPLAINT_DOC_TYPE,
                                         body=date_bucket_body)
 
     res_trends = process_trends_response(res_trends)
     res_trends['aggregations']['dateRangeBuckets'] = \
         res_date_buckets['aggregations']['dateRangeBuckets']
-
+    
+    res_trends['aggregations']['dateRangeBuckets']['body'] = date_bucket_body
+    
     return res_trends

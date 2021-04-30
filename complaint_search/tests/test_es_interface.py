@@ -7,7 +7,7 @@ from django.test import TestCase
 import mock
 from complaint_search.es_builders import AggregationBuilder, SearchBuilder
 from complaint_search.es_interface import (
-    _COMPLAINT_DOC_TYPE,
+    _extract_total,
     _get_meta,
     document,
     filter_suggest,
@@ -19,11 +19,14 @@ from complaint_search.tests.es_interface_test_helpers import (
     assertBodyEqual,
     load,
 )
-from elasticsearch import Elasticsearch
+from elasticsearch7 import Elasticsearch
 from nose_parameterized import parameterized
 
 
 class EsInterfaceTest_Search(TestCase):
+    def setUp(self):
+        self.maxDiff = None
+
     # -------------------------------------------------------------------------
     # Helper Attributes
     # -------------------------------------------------------------------------
@@ -32,7 +35,11 @@ class EsInterfaceTest_Search(TestCase):
             "search": "OK",
             "_scroll_id": "This_is_a_scroll_id",
             "hits": {
-                "hits": [0, 1, 2, 3]
+                "hits": [0, 1, 2, 3],
+                "total": {
+                    "value": 4,
+                    "relation": "eq"
+                },
             }
         },
         {
@@ -59,7 +66,8 @@ class EsInterfaceTest_Search(TestCase):
         'search': 'OK',
         "_scroll_id": "This_is_a_scroll_id",
         "hits": {
-            "hits": [0, 1, 2, 3]
+            "hits": [0, 1, 2, 3],
+            "total": 4
         },
         '_meta': {
             'total_record_count': 100,
@@ -118,7 +126,7 @@ class EsInterfaceTest_Search(TestCase):
         self.assertEqual(1, len(mock_search.call_args_list))
         self.assertEqual(2, len(mock_search.call_args_list[0]))
         self.assertEqual(0, len(mock_search.call_args_list[0][0]))
-        self.assertEqual(4, len(mock_search.call_args_list[0][1]))
+        self.assertEqual(3, len(mock_search.call_args_list[0][1]))
 
         assertBodyEqual(body, mock_search.call_args_list[0][1]['body'])
         self.assertEqual(mock_search.call_args_list[0][1]['index'], 'INDEX')
@@ -128,6 +136,26 @@ class EsInterfaceTest_Search(TestCase):
     # -------------------------------------------------------------------------
     # Tests
     # -------------------------------------------------------------------------
+
+    def test__extract_total_missing(self):
+        fixture = {'hits': {}}
+        actual = _extract_total(fixture)
+        self.assertEqual(None, actual)
+
+    def test__extract_from_aggs_good(self):
+        fixture = {
+            'hits': {'total': {'value': 10000, 'relation': 'gte'}},
+            'aggregations': {'has_narrative': {'doc_count': 99999}}
+        }
+        actual = _extract_total(fixture)
+        self.assertEqual(99999, actual)
+
+    def test__extract_from_aggs_failed(self):
+        fixture = {
+            'hits': {'total': {'value': 10000, 'relation': 'gte'}}
+        }
+        actual = _extract_total(fixture)
+        self.assertEqual(None, actual)
 
     @mock.patch("complaint_search.es_interface._get_now")
     @mock.patch.object(Elasticsearch, 'search')
@@ -188,7 +216,7 @@ class EsInterfaceTest_Search(TestCase):
     @mock.patch.object(ElasticSearchExporter, 'export_csv')
     @mock.patch.object(ElasticSearchExporter, 'export_json')
     @mock.patch.object(Elasticsearch, 'search')
-    @mock.patch('elasticsearch.helpers.scan')
+    @mock.patch('elasticsearch7.helpers.scan')
     def test_search_with_format__valid(
         self,
         export_type,
@@ -215,12 +243,6 @@ class EsInterfaceTest_Search(TestCase):
             self.assertEqual(1, mock_search.call_count)
             self.assertEqual(1, mock_exporter_json.call_count)
             self.assertEqual(0, mock_exporter_csv.call_count)
-
-    def test_search_with_field__valid(self):
-        self.request_test("search_with_field__valid", field="test_field")
-
-    def test_search_with_field_all__valid(self):
-        self.request_test("search_with_field_all__valid", field="_all")
 
     @mock.patch.object(Elasticsearch, 'search')
     @mock.patch('requests.get', ok=True, content="RGET_OK")
@@ -255,7 +277,7 @@ class EsInterfaceTest_Search(TestCase):
         self.assertEqual(1, len(mock_search.call_args_list))
         self.assertEqual(2, len(mock_search.call_args_list[0]))
         self.assertEqual(0, len(mock_search.call_args_list[0][0]))
-        self.assertEqual(4, len(mock_search.call_args_list[0][1]))
+        self.assertEqual(3, len(mock_search.call_args_list[0][1]))
         self.assertDictEqual(mock_search.call_args_list[0][1]['body'], body)
         self.assertEqual(mock_search.call_args_list[0][1]['index'], 'INDEX')
         self.assertEqual(mock_scroll.call_count, 2)
@@ -306,13 +328,20 @@ class EsInterfaceTest_Search(TestCase):
             mock_search.assert_any_call(
                 body=body,
                 index="INDEX",
-                doc_type=_COMPLAINT_DOC_TYPE,
                 scroll="10m"
             )
             self.assertEqual(self.MOCK_SEARCH_RESULT, res)
 
         mock_scroll.assert_not_called()
         self.assertEqual(4, mock_search.call_count)
+
+    def test_search_with_search_term_field_all(self):
+        self.request_test("search_with_search_term_field_all",
+                          search_term="test term", field="all")
+
+    def test_search_with_search_term_field__all(self):
+        self.request_test("search_with_search_term_field_all",
+                          search_term="test term", field="_all")
 
     def test_search_with_search_term_match__valid(self):
         self.request_test("search_with_search_term_match__valid",
@@ -457,85 +486,73 @@ class EsInterfaceTest_Search(TestCase):
 
 
 class EsInterfaceTest_Suggest(TestCase):
+    def setUp(self):
+        self.fixture_response = {
+            "suggest": {
+                "sgg": [
+                    {
+                        'options': [
+                            {
+                                "text": "test 1",
+                                "score": 1.0
+                            },
+                            {
+                                "text": "test 2",
+                                "score": 1.0
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        self.fixture_request = {
+            "_source": False,
+            "suggest": {
+                "sgg": {
+                    "completion": {
+                        "field": "typeahead_dropdown",
+                        "skip_duplicates": True,
+                        "size": 6
+                    },
+                    "text": "Loan"
+                }
+            }
+        }
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch.object(Elasticsearch, 'suggest')
+    @mock.patch.object(Elasticsearch, 'search')
     def test_suggest_with_no_param__valid(self, mock_suggest):
-        mock_suggest.return_value = {
-            "sgg": [
-                {
-                    'options': [
-                        {
-                            "text": "test 1",
-                            "score": 1.0
-                        },
-                        {
-                            "text": "test 2",
-                            "score": 1.0
-                        }
-                    ]
-                }
-            ]
-        }
+        mock_suggest.return_value = self.fixture_response
         res = suggest()
         mock_suggest.assert_not_called()
         self.assertEqual([], res)
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch.object(Elasticsearch, 'suggest')
+    @mock.patch.object(Elasticsearch, 'search')
     def test_suggest_with_text__valid(self, mock_suggest):
-        mock_suggest.return_value = {
-            "sgg": [
-                {
-                    'options': [
-                        {
-                            "text": "test 1",
-                            "score": 1.0
-                        },
-                        {
-                            "text": "test 2",
-                            "score": 1.0
-                        }
-                    ]
-                }
-            ]
-        }
-        body = {"sgg": {"text": "Mortgage", "completion": {
-            "field": "suggest", "size": 6}}}
+        mock_suggest.return_value = self.fixture_response
+        self.fixture_request['suggest']['sgg']['text'] = 'Mortgage'
+
         res = suggest(text="Mortgage")
         self.assertEqual(len(mock_suggest.call_args), 2)
         self.assertEqual(0, len(mock_suggest.call_args[0]))
         self.assertEqual(2, len(mock_suggest.call_args[1]))
-        self.assertDictEqual(mock_suggest.call_args[1]['body'], body)
+        self.assertDictEqual(mock_suggest.call_args[1]['body'],
+                             self.fixture_request)
         self.assertEqual(mock_suggest.call_args[1]['index'], 'INDEX')
         self.assertEqual(['test 1', 'test 2'], res)
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch.object(Elasticsearch, 'suggest')
+    @mock.patch.object(Elasticsearch, 'search')
     def test_suggest_with_size__valid(self, mock_suggest):
-        mock_suggest.return_value = {
-            "sgg": [
-                {
-                    'options': [
-                        {
-                            "text": "test 1",
-                            "score": 1.0
-                        },
-                        {
-                            "text": "test 2",
-                            "score": 1.0
-                        }
-                    ]
-                }
-            ]
-        }
-        body = {"sgg": {"text": "Loan", "completion": {
-            "field": "suggest", "size": 10}}}
+        mock_suggest.return_value = self.fixture_response
+        self.fixture_request['suggest']['sgg']['completion']['size'] = 10
         res = suggest(text="Loan", size=10)
         self.assertEqual(len(mock_suggest.call_args), 2)
         self.assertEqual(0, len(mock_suggest.call_args[0]))
         self.assertEqual(2, len(mock_suggest.call_args[1]))
-        self.assertDictEqual(mock_suggest.call_args[1]['body'], body)
+        self.assertDictEqual(mock_suggest.call_args[1]['body'],
+                             self.fixture_request)
         self.assertEqual(mock_suggest.call_args[1]['index'], 'INDEX')
         self.assertEqual(['test 1', 'test 2'], res)
 
@@ -560,7 +577,6 @@ class EsInterfaceTest_FilterSuggest(TestCase):
             "aggregations": {}}
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE", "DOCTYPE")
     @mock.patch.object(AggregationBuilder, 'build_one')
     @mock.patch.object(SearchBuilder, 'build')
     @mock.patch.object(Elasticsearch, 'search')
@@ -626,7 +642,6 @@ class EsInterfaceTest_FilterSuggest(TestCase):
                     }
                 }
             },
-            doc_type='DOCTYPE',
             index='INDEX')
         mock_builder2.assert_called_once_with('company.suggest')
         self.assertEqual(actual, [
@@ -634,7 +649,6 @@ class EsInterfaceTest_FilterSuggest(TestCase):
         ])
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE", "DOCTYPE")
     @mock.patch.object(AggregationBuilder, 'build_one')
     @mock.patch.object(SearchBuilder, 'build')
     @mock.patch.object(Elasticsearch, 'search')
@@ -694,7 +708,6 @@ class EsInterfaceTest_FilterSuggest(TestCase):
                     }
                 }
             },
-            doc_type='DOCTYPE',
             index='INDEX')
         mock_builder2.assert_called_once_with('zip_code')
         self.assertEqual(actual, [
@@ -705,8 +718,6 @@ class EsInterfaceTest_FilterSuggest(TestCase):
 class EsInterfaceTest_Document(TestCase):
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE",
-                "DOC_TYPE")
     @mock.patch.object(Elasticsearch, 'search')
     def test_document__valid(self, mock_search):
         mock_search.return_value = 'OK'
@@ -714,8 +725,7 @@ class EsInterfaceTest_Document(TestCase):
         res = document(123456)
         self.assertEqual(len(mock_search.call_args), 2)
         self.assertEqual(0, len(mock_search.call_args[0]))
-        self.assertEqual(3, len(mock_search.call_args[1]))
+        self.assertEqual(2, len(mock_search.call_args[1]))
         self.assertDictEqual(mock_search.call_args[1]['body'], body)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual('OK', res)

@@ -6,14 +6,12 @@ from complaint_search.tests.es_interface_test_helpers import (
     assertBodyEqual,
     load,
 )
-from elasticsearch import Elasticsearch
+from elasticsearch7 import Elasticsearch
 
 
 class EsInterfaceTest_States(TestCase):
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE",
-                "DOC_TYPE")
     @mock.patch.object(Elasticsearch, 'search')
     def test_states__valid(self, mock_search):
         body = load('states_agg__valid')
@@ -22,15 +20,12 @@ class EsInterfaceTest_States(TestCase):
         res = states_agg()
         self.assertEqual(len(mock_search.call_args), 2)
         self.assertEqual(0, len(mock_search.call_args[0]))
-        self.assertEqual(4, len(mock_search.call_args[1]))
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
+        self.assertEqual(2, len(mock_search.call_args[1]))
         assertBodyEqual(body, mock_search.call_args_list[0][1]['body'])
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual('OK', res)
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE",
-                "DOC_TYPE")
     @mock.patch.object(Elasticsearch, 'search')
     def test_states_exclude__valid(self, mock_search):
         body = load('states_agg__valid')
@@ -39,15 +34,12 @@ class EsInterfaceTest_States(TestCase):
         res = states_agg(['zip_code'])
         self.assertEqual(len(mock_search.call_args), 2)
         self.assertEqual(0, len(mock_search.call_args[0]))
-        self.assertEqual(4, len(mock_search.call_args[1]))
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
+        self.assertEqual(2, len(mock_search.call_args[1]))
         assertBodyEqual(body, mock_search.call_args_list[0][1]['body'])
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual('OK', res)
 
     @mock.patch("complaint_search.es_interface._COMPLAINT_ES_INDEX", "INDEX")
-    @mock.patch("complaint_search.es_interface._COMPLAINT_DOC_TYPE",
-                "DOC_TYPE")
     @mock.patch.object(Elasticsearch, 'search')
     def test_states_date_filters__valid(self, mock_search):
         params = {
@@ -65,8 +57,7 @@ class EsInterfaceTest_States(TestCase):
         res = states_agg(**params)
         self.assertEqual(len(mock_search.call_args), 2)
         self.assertEqual(0, len(mock_search.call_args[0]))
-        self.assertEqual(4, len(mock_search.call_args[1]))
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
+        self.assertEqual(2, len(mock_search.call_args[1]))
         assertBodyEqual(body, mock_search.call_args_list[0][1]['body'])
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(res, 'OK')

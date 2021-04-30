@@ -56,8 +56,7 @@
       "aggs": {
         "company_public_response": {
           "terms": {
-            "field": "company_public_response.raw",
-            "size": 0
+            "field": "company_public_response.raw"
           }
         }
       },
@@ -72,8 +71,7 @@
       "aggs": {
         "company_response": {
           "terms": {
-            "field": "company_response",
-            "size": 0
+            "field": "company_response"
           }
         }
       },
@@ -88,8 +86,7 @@
       "aggs": {
         "consumer_consent_provided": {
           "terms": {
-            "field": "consumer_consent_provided.raw",
-            "size": 0
+            "field": "consumer_consent_provided.raw"
           }
         }
       },
@@ -104,8 +101,7 @@
       "aggs": {
         "consumer_disputed": {
           "terms": {
-            "field": "consumer_disputed.raw",
-            "size": 0
+            "field": "consumer_disputed.raw"
           }
         }
       },
@@ -120,8 +116,7 @@
       "aggs": {
         "has_narrative": {
           "terms": {
-            "field": "has_narrative",
-            "size": 0
+            "field": "has_narrative"
           }
         }
       },
@@ -136,14 +131,12 @@
       "aggs": {
         "issue": {
           "terms": {
-            "field": "issue.raw",
-            "size": 0
+            "field": "issue.raw"
           },
           "aggs": {
             "sub_issue.raw": {
               "terms": {
-                "field": "sub_issue.raw",
-                "size": 0
+                "field": "sub_issue.raw"
               }
             }
           }
@@ -160,14 +153,12 @@
       "aggs": {
         "product": {
           "terms": {
-            "field": "product.raw",
-            "size": 0
+            "field": "product.raw"
           },
           "aggs": {
             "sub_product.raw": {
               "terms": {
-                "field": "sub_product.raw",
-                "size": 0
+                "field": "sub_product.raw"
               }
             }
           }
@@ -184,8 +175,7 @@
       "aggs": {
         "state": {
           "terms": {
-            "field": "state",
-            "size": 0
+            "field": "state"
           }
         }
       },
@@ -200,8 +190,7 @@
       "aggs": {
         "submitted_via": {
           "terms": {
-            "field": "submitted_via",
-            "size": 0
+            "field": "submitted_via"
           }
         }
       },
@@ -216,8 +205,7 @@
       "aggs": {
         "tags": {
           "terms": {
-            "field": "tags",
-            "size": 0
+            "field": "tags"
           }
         }
       },
@@ -232,8 +220,7 @@
       "aggs": {
         "timely": {
           "terms": {
-            "field": "timely",
-            "size": 0
+            "field": "timely"
           }
         }
       },

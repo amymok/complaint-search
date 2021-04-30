@@ -18,7 +18,7 @@ from complaint_search.throttling import (
     ExportUIRateThrottle,
     SearchAnonRateThrottle,
 )
-from elasticsearch import TransportError
+from elasticsearch7 import TransportError
 from rest_framework import status
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.test import APITestCase
