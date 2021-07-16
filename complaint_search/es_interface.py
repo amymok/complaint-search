@@ -5,11 +5,13 @@ from datetime import datetime, timedelta
 
 from complaint_search.defaults import (
     CSV_ORDERED_HEADERS,
+    DEFAULT_PAGINATION_DEPTH,
     EXPORT_FORMATS,
     PARAMS,
 )
 from complaint_search.es_builders import (
     AggregationBuilder,
+    CountBuilder,
     DateRangeBucketsBuilder,
     PostFilterBuilder,
     SearchBuilder,
@@ -17,9 +19,12 @@ from complaint_search.es_builders import (
     TrendsAggregationBuilder,
 )
 from complaint_search.export import ElasticSearchExporter
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch7 import Elasticsearch, RequestsHttpConnection, helpers
 from flags.state import flag_enabled
+from requests_aws4auth import AWS4Auth
 
+
+log = logging.getLogger(__name__)
 
 _ES_URL = "{}://{}:{}".format("http", os.environ.get('ES_HOST', 'localhost'),
                               os.environ.get('ES_PORT', '9200'))
@@ -27,6 +32,15 @@ _ES_USER = os.environ.get('ES_USER', '')
 _ES_PASSWORD = os.environ.get('ES_PASSWORD', '')
 
 _ES_INSTANCE = None
+
+USE_AWS_ES = os.environ.get('USE_AWS_ES', False)
+AWS_ES_ACCESS_KEY = os.environ.get('AWS_ES_ACCESS_KEY')
+AWS_ES_SECRET_KEY = os.environ.get('AWS_ES_SECRET_KEY')
+# The below was configured because of a naming convention chosen by
+# CF.gov for ES7 Host. May require changing if var name changed
+# https://github.com/cfpb/consumerfinance.gov/blob/main/.env_SAMPLE#L92
+AWS_ES_HOST = os.environ.get('ES7_HOST')
+
 
 _COMPLAINT_ES_INDEX = os.environ.get('COMPLAINT_ES_INDEX', 'complaint-index')
 _COMPLAINT_DOC_TYPE = os.environ.get('COMPLAINT_DOC_TYPE', 'complaint-doctype')
@@ -57,6 +71,23 @@ def build_trend_meta(response):
         meta['date_max'] = date_max
 
     return meta
+
+
+def get_break_points(hits, size):
+    """Return a dict of 'search-after' values for pagination."""
+    end_page = int(DEFAULT_PAGINATION_DEPTH / size) - 1
+    break_points = {}
+    if size > len(hits):
+        return break_points
+    # we don't need a break point for page 1; start with page 2
+    page = 2
+    break_points[page] = hits[size - 1].get("sort")
+    next_batch = hits[size:]
+    while page < end_page and len(next_batch) > size:
+        page += 1
+        break_points[page] = next_batch[size - 1].get("sort")
+        next_batch = next_batch[size:]
+    return break_points
 
 
 # Find sub_agg name if it exists in order to filter percent change
@@ -110,11 +141,27 @@ def process_trends_response(response):
 def _get_es():
     global _ES_INSTANCE
     if _ES_INSTANCE is None:
-        _ES_INSTANCE = Elasticsearch(
-            [_ES_URL],
-            http_auth=(_ES_USER, _ES_PASSWORD),
-            timeout=100
-        )
+        if USE_AWS_ES:
+            awsauth = AWS4Auth(
+                AWS_ES_ACCESS_KEY,
+                AWS_ES_SECRET_KEY,
+                'us-east-1',
+                'es'
+            )
+            _ES_INSTANCE = Elasticsearch(
+                hosts=[{'host': AWS_ES_HOST, 'port': 443}],
+                http_auth=awsauth,
+                use_ssl=True,
+                verify_certs=True,
+                connection_class=RequestsHttpConnection,
+                timeout=100
+            )
+        else:
+            _ES_INSTANCE = Elasticsearch(
+                [_ES_URL],
+                http_auth=(_ES_USER, _ES_PASSWORD),
+                timeout=100
+            )
     return _ES_INSTANCE
 
 
@@ -180,8 +227,7 @@ def _get_meta():
     }
     max_date_res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=body)
     count_res = _get_es().count(
-        index=_COMPLAINT_ES_INDEX,
-        doc_type=_COMPLAINT_DOC_TYPE
+        index=_COMPLAINT_ES_INDEX
     )
 
     result = {
@@ -194,106 +240,119 @@ def _get_meta():
         "total_record_count": count_res["count"],
         "is_data_stale": _is_data_stale(
             max_date_res["aggregations"]["max_date"]["value_as_string"]),
-        "is_narrative_stale": _is_data_stale(from_timestamp(
-            max_date_res["aggregations"]["max_narratives"]["max_date"]["value"]
-        )),
+        # TODO: remove is_narrative_stale -- no longer used
+        # "is_narrative_stale": _is_data_stale(from_timestamp(
+        #     max_date_res["aggregations"]["max_narratives"]["max_date"]["value"]
+        # )),
         "has_data_issue": bool(flag_enabled('CCDB_TECHNICAL_ISSUES'))
     }
 
     return result
 
-# List of possible arguments:
-# - format: format to be returned: "json", "csv"
-# - field: field you want to search in: "complaint_what_happened",
-#   "company_public_response", "_all"
-# - size: number of complaints to return
-# - frm: from which index to start returning
-# - sort: sort by: "relevance_desc", "relevance_asc", "created_date_desc",
-#   "created_date_asc"
-# - search_term: the term to be searched
-# - date_received_min: return only date received including and later than this
-#   date i.e. 2017-03-02
-# - date_received_max: return only date received before this date, i.e.
-#   2017-04-12
-# - company_received_min: return only date company received including and later
-#   than this date i.e. 2017-03-02
-# - company_received_max: return only date company received before this date,
-#   i.e. 2017-04-12
-# - company: filters a list of companies you want ["Bank 1", "Bank 2"]
-# - product: filters a list of product you want if a subproduct is needed to
-#   filter, separated by a bullet (u'\u2022), i.e.
-#   [u"Mortgage\u2022FHA Mortgage", "Payday Loan"]
-# - issue: filters a list of issue you want if a subissue is needed to filter,
-#   separated by a bullet (u'\u2022), i.e. See Product above
-# - state: filters a list of states you want
-# - zip_code: filters a list of zipcodes you want
-# - timely: filters a list of whether the company responds in a timely matter
-#   or not
-# - consumer_disputed: filters a list of dispute resolution
-# - company_response: filters a list of response from the company to consumer
-# - company_public_response: filters a list of public response from the company
-# - consumer_consent_provided: filters a list of whether consumer consent was
-#   provided in the complaint
-# - has_narrative: filters a list of whether complaint has narratives or not
-# - submitted_via: filters a list of ways the complaint was submitted
-# - tags - filters a list of tags
+
+def _extract_count(params):
+    """Consult the count API for an accurate hit count regardless of size."""
+    count_builder = CountBuilder()
+    count_builder.add(**params)
+    body = count_builder.build()
+    res = _get_es().count(index=_COMPLAINT_ES_INDEX, body=body)
+    return res.get("count")
+
+
+def test_float(value):
+    try:
+        _float = float(value)
+    except Exception:
+        return
+    return _float
+
+
+def parse_search_after(params):
+    """Validate search_after and return it as a list of [score, ID]."""
+    search_pair = params.get("search_after")
+    sort = params.get("sort")
+    if not search_pair or not sort:
+        return
+    if '_' not in search_pair or len(search_pair.split("_")) != 2:
+        return
+    _score, _id = search_pair.split("_")
+    _sort = sort.split("_")[0]
+    if _sort not in ["relevance", "created"]:
+        log.error("{} is not a supported sort value.".format(_sort))
+        return
+    if _sort == "relevance":
+        score = test_float(_score)
+        if score is None:
+            log.error("Search_after relevance score is not a float.")
+            return
+    elif _sort == "created":
+        if not str(_score).isdigit():
+            log.error("Search_after date score is not an integer.")
+            return
+        score = int(_score)
+    return [score, _id]
 
 
 def search(agg_exclude=None, **kwargs):
     params = copy.deepcopy(PARAMS)
     params.update(**kwargs)
+    search_after = parse_search_after(params)
+    if search_after:
+        params["search_after"] = search_after
     search_builder = SearchBuilder()
     search_builder.add(**params)
     body = search_builder.build()
     post_filter_builder = PostFilterBuilder()
     post_filter_builder.add(**params)
     body["post_filter"] = post_filter_builder.build()
-
-    log = logging.getLogger(__name__)
-    log.info(
-        'Calling %s/%s/%s/_search with %s',
-        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body
-    )
-
     # format
     res = {}
-    format = params.get("format")
-    if format == "default":
-        if body["size"] > 1000:
-            body["size"] = 1000
-
+    _format = params.get("format")
+    if _format == "default":
         if not params.get("no_aggs"):
             aggregation_builder = AggregationBuilder()
             aggregation_builder.add(**params)
             if agg_exclude:
                 aggregation_builder.add_exclude(agg_exclude)
             body["aggs"] = aggregation_builder.build()
-
-        res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                               doc_type=_COMPLAINT_DOC_TYPE,
-                               body=body,
-                               scroll="10m")
-
+        log.info(
+            'Requesting %s/%s/_search with %s',
+            _ES_URL, _COMPLAINT_ES_INDEX, body
+        )
+        res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=body)
+        hit_total = _extract_count(params)
+        res['hits']['total']['value'] = hit_total
+        break_points = {}
+        # page = 1
         if res['hits']['hits']:
-            num_of_scroll = params.get("frm") / body["size"]
-            scroll_id = res['_scroll_id']
-            if num_of_scroll > 0:
-                while num_of_scroll > 0:
-                    res['hits']['hits'] = _get_es().scroll(
-                        scroll_id=scroll_id,
-                        scroll="10m"
-                    )['hits']['hits']
-                    num_of_scroll -= 1
+            # if body.get("frm") and body.get("size"):
+            #     page = body["frm"] / body["size"] + 1
+            if hit_total and hit_total > body["size"]:
+                # We have more than one page of results and need pagination
+                pagination_body = copy.deepcopy(body)
+                pagination_body["size"] = DEFAULT_PAGINATION_DEPTH
+                if "search_after" in pagination_body:
+                    del pagination_body["search_after"]
+                log.info(
+                    'Harvesting pagination dict using %s/%s/_search with %s',
+                    _ES_URL, _COMPLAINT_ES_INDEX, pagination_body
+                )
+                pagination_res = _get_es().search(
+                    index=_COMPLAINT_ES_INDEX,
+                    body=pagination_body
+                )
+                break_points = get_break_points(
+                    pagination_res['hits']['hits'], body["size"])
         res["_meta"] = _get_meta()
+        res["_meta"]["break_points"] = break_points
 
-    elif format in EXPORT_FORMATS:
-        scanResponse = helpers.scan(
+    elif _format in EXPORT_FORMATS:
+        scan_response = helpers.scan(
             client=_get_es(),
             query=body,
             scroll="10m",
             index=_COMPLAINT_ES_INDEX,
             size=7000,
-            doc_type=_COMPLAINT_DOC_TYPE,
             request_timeout=3000
         )
 
@@ -301,7 +360,7 @@ def search(agg_exclude=None, **kwargs):
 
         if params.get("format") == 'csv':
             res = exporter.export_csv(
-                scanResponse,
+                scan_response,
                 CSV_ORDERED_HEADERS
             )
         elif params.get("format") == 'json':
@@ -310,10 +369,9 @@ def search(agg_exclude=None, **kwargs):
             body['size'] = 0
 
             res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                   doc_type=_COMPLAINT_DOC_TYPE,
                                    body=body,
                                    scroll="10m")
-            res = exporter.export_json(scanResponse, res['hits']['total'])
+            res = exporter.export_json(scan_response, res['hits']['total'])
 
     return res
 
@@ -321,11 +379,19 @@ def search(agg_exclude=None, **kwargs):
 def suggest(text=None, size=6):
     if text is None:
         return []
-    body = {"sgg": {"text": text, "completion": {
-        "field": "suggest", "size": size}}}
+    body = {
+        "_source": False,
+        "suggest": {
+            "sgg": {
+                "text": text,
+                "completion": {
+                    "field": "typeahead_dropdown",
+                    "skip_duplicates": True,
+                    "size": size
+                }}}}
 
-    res = _get_es().suggest(index=_COMPLAINT_ES_INDEX, body=body)
-    candidates = [e['text'] for e in res['sgg'][0]['options']]
+    res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=body)
+    candidates = [e['text'] for e in res['suggest']['sgg'][0]['options']]
     return candidates
 
 
@@ -368,7 +434,6 @@ def filter_suggest(filterField, display_field=None, **kwargs):
     # format
     res = _get_es().search(
         index=_COMPLAINT_ES_INDEX,
-        doc_type=_COMPLAINT_DOC_TYPE,
         body=body
     )
     # reformat the return
@@ -382,24 +447,23 @@ def filter_suggest(filterField, display_field=None, **kwargs):
 
 def document(complaint_id):
     doc_query = {"query": {"term": {"_id": complaint_id}}}
-    res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                           doc_type=_COMPLAINT_DOC_TYPE, body=doc_query)
+    res = _get_es().search(index=_COMPLAINT_ES_INDEX, body=doc_query)
     return res
 
 
 def states_agg(agg_exclude=None, **kwargs):
     params = copy.deepcopy(PARAMS)
     params.update(**kwargs)
-    params.update({'size': 0})
+    params.update({'size': 500})
     search_builder = SearchBuilder()
     search_builder.add(**params)
     body = search_builder.build()
-
-    log = logging.getLogger(__name__)
     log.info(
         'Calling %s/%s/%s/states with %s',
-        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body
+        _ES_URL, _COMPLAINT_ES_INDEX, _COMPLAINT_DOC_TYPE, body,
     )
+    log.info(
+        'Params are %s', params)
 
     aggregation_builder = StateAggregationBuilder()
     aggregation_builder.add(**params)
@@ -407,10 +471,12 @@ def states_agg(agg_exclude=None, **kwargs):
         aggregation_builder.add_exclude(agg_exclude)
     body["aggs"] = aggregation_builder.build()
 
-    res = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                           doc_type=_COMPLAINT_DOC_TYPE,
-                           body=body,
-                           scroll="10m")
+    res = _get_es().search(
+        index=_COMPLAINT_ES_INDEX,
+        body=body
+    )
+    hit_total = _extract_count(params)
+    res['hits']['total']['value'] = hit_total
 
     return res
 
@@ -432,20 +498,13 @@ def trends(agg_exclude=None, **kwargs):
     body["aggs"] = aggregation_builder.build()
 
     res_trends = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                  doc_type=_COMPLAINT_DOC_TYPE,
                                   body=body)
 
     res_date_buckets = None
 
     date_bucket_body = copy.deepcopy(body)
     date_bucket_body['query'] = {
-        "query_string": {
-            "query": "*",
-            "fields": [
-                "_all"
-            ],
-            "default_operator": "AND"
-        }
+        "match_all": {}
     }
 
     date_range_buckets_builder = DateRangeBucketsBuilder()
@@ -453,11 +512,12 @@ def trends(agg_exclude=None, **kwargs):
     date_bucket_body['aggs'] = date_range_buckets_builder.build()
 
     res_date_buckets = _get_es().search(index=_COMPLAINT_ES_INDEX,
-                                        doc_type=_COMPLAINT_DOC_TYPE,
                                         body=date_bucket_body)
 
     res_trends = process_trends_response(res_trends)
     res_trends['aggregations']['dateRangeBuckets'] = \
         res_date_buckets['aggregations']['dateRangeBuckets']
+
+    res_trends['aggregations']['dateRangeBuckets']['body'] = date_bucket_body
 
     return res_trends

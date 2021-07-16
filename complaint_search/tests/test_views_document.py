@@ -2,7 +2,7 @@ from django.core.cache import cache
 
 import mock
 from complaint_search.throttling import _CCDB_UI_URL, DocumentAnonRateThrottle
-from elasticsearch import TransportError
+from elasticsearch7 import TransportError
 from rest_framework import status
 from rest_framework.test import APITestCase
 

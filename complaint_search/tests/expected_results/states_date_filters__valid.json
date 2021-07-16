@@ -1,175 +1,172 @@
 {
-        "from": 0,
-        "size": 0,
+    "size": 500,
         "_source": [
-            "company",
-            "company_public_response",
-            "company_response",
-            "complaint_id",
-            "complaint_what_happened",
-            "consumer_consent_provided",
-            "consumer_disputed",
-            "date_received",
-            "date_sent_to_company",
-            "has_narrative",
-            "issue",
-            "product",
-            "state",
-            "submitted_via",
-            "sub_issue",
-            "sub_product",
-            "tags",
-            "timely",
-            "zip_code"
-        ],
-        "query": {
-            "query_string": {
-                "query": "*",
-                "fields": [
-                    "complaint_what_happened"
-                ],
-                "default_operator": "AND"
+        "company",
+        "company_public_response",
+        "company_response",
+        "complaint_id",
+        "complaint_what_happened",
+        "consumer_consent_provided",
+        "consumer_disputed",
+        "date_received",
+        "date_sent_to_company",
+        "has_narrative",
+        "issue",
+        "product",
+        "state",
+        "submitted_via",
+        "sub_issue",
+        "sub_product",
+        "tags",
+        "timely",
+        "zip_code"
+    ],
+    "highlight": {
+        "require_field_match": false,
+        "number_of_fragments": 1,
+        "fragment_size": 500,
+        "fields": {
+            "complaint_what_happened": {}
+        }
+    },
+    "sort": [
+      {"_score": {"order": "desc"}},
+      {"_id": "desc"}
+    ],
+    "aggs": {
+        "issue": {
+            "filter": {
+                "bool": {
+                    "must": [
+                        {
+                            "range": {
+                                "date_received": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
+                                }
+                            }
+                        },
+                        {
+                            "range": {
+                                "date_sent_to_company": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
+                                }
+                            }
+                        },
+                        {
+                            "terms": {
+                                "state": [
+                                    "VA"
+                                ]
+                            }
+                        }
+                    ],
+                    "must_not": []
+                }
+            },
+            "aggs": {
+                "issue": {
+                    "terms": {
+                        "field": "issue.raw",
+                        "size": 5
+                    },
+                    "aggs": {
+                        "issue": {
+                            "terms": {
+                                "field": "sub_issue.raw"
+                            }
+                        }
+                    }
+                }
             }
         },
-        "aggs": {
-            "issue": {
-                "filter": {
-                    "bool": {
-                        "must": [
-                            {
-                                "range": {
-                                    "date_received": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
-                            },
-                            {
-                                "range": {
-                                    "date_sent_to_company": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
-                            },
-                            {
-                                "terms": {
-                                    "state": [
-                                        "VA"
-                                    ]
+        "product": {
+            "filter": {
+                "bool": {
+                    "must": [
+                        {
+                            "range": {
+                                "date_received": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
                                 }
                             }
-                        ],
-                        "must_not": []
-                    }
-                },
-                "aggs": {
-                    "issue": {
-                        "terms": {
-                            "field": "issue.raw",
-                            "size": 5
                         },
-                        "aggs": {
-                            "issue": {
-                                "terms": {
-                                    "field": "sub_issue.raw",
-                                    "size": 10
+                        {
+                            "range": {
+                                "date_sent_to_company": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
                                 }
+                            }
+                        },
+                        {
+                            "terms": {
+                                "state": [
+                                    "VA"
+                                ]
+                            }
+                        }
+                    ],
+                    "must_not": []
+                }
+            },
+            "aggs": {
+                "product": {
+                    "terms": {
+                        "field": "product.raw",
+                        "size": 5
+                    },
+                    "aggs": {
+                        "product": {
+                            "terms": {
+                                "field": "sub_product.raw"
                             }
                         }
                     }
                 }
-            },
-            "product": {
-                "filter": {
-                    "bool": {
-                        "must": [
-                            {
-                                "range": {
-                                    "date_received": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
-                            },
-                            {
-                                "range": {
-                                    "date_sent_to_company": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
-                            },
-                            {
-                                "terms": {
-                                    "state": [
-                                        "VA"
-                                    ]
+            }
+        },
+        "state": {
+            "filter": {
+                "bool": {
+                    "must": [
+                        {
+                            "range": {
+                                "date_received": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
                                 }
                             }
-                        ],
-                        "must_not": []
-                    }
-                },
-                "aggs": {
-                    "product": {
-                        "terms": {
-                            "field": "product.raw",
-                            "size": 5
                         },
-                        "aggs": {
-                            "product": {
-                                "terms": {
-                                    "field": "sub_product.raw",
-                                    "size": 10
+                        {
+                            "range": {
+                                "date_sent_to_company": {
+                                    "from": "2020-01-01",
+                                    "to": "2020-05-05"
                                 }
                             }
                         }
-                    }
+                    ],
+                    "must_not": []
                 }
             },
-            "state": {
-                "filter": {
-                    "bool": {
-                        "must": [
-                            {
-                                "range": {
-                                    "date_received": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
-                            },
-                            {
-                                "range": {
-                                    "date_sent_to_company": {
-                                        "from": "2020-01-01",
-                                        "to": "2020-05-05"
-                                    }
-                                }
+            "aggs": {
+                "state": {
+                    "terms": {
+                        "field": "state",
+                        "size": 100
+                    },
+                    "aggs": {
+                        "product": {
+                            "terms": {
+                                "field": "product.raw"
                             }
-                        ],
-                        "must_not": []
-                    }
-                },
-                "aggs": {
-                    "state": {
-                        "terms": {
-                            "field": "state",
-                            "size": 0
                         },
-                        "aggs": {
-                            "product": {
-                                "terms": {
-                                    "field": "product.raw",
-                                    "size": 1
-                                }
-                            },
-                            "issue": {
-                                "terms": {
-                                    "field": "issue.raw",
-                                    "size": 1
-                                }
+                        "issue": {
+                            "terms": {
+                                "field": "issue.raw"
                             }
                         }
                     }
@@ -177,3 +174,4 @@
             }
         }
     }
+}

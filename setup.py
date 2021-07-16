@@ -49,9 +49,10 @@ install_requires = [
     'djangorestframework>=3.9.1,<4.0',
     'django-rest-swagger>=2.2.0',
     'requests>=2.18,<3',
-    'elasticsearch>=2.4.1,<3',
+    'elasticsearch7>=7.0.0,<8.0.0',
     'django-localflavor>=1.1,<3.1',
     'django-flags>=4.0.1,<5.1',
+    'requests-aws4auth'
 ]
 
 testing_extras = [
@@ -61,6 +62,8 @@ testing_extras = [
     'deepdiff>=3.3,<5.0',
     'django-nose==1.4.1',
     'parameterized==0.6.1',
+    'elasticsearch7>=7.0.0,<8.0.0',
+    'requests-aws4auth'
 ]
 
 docs_extras = [

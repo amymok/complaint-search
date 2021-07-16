@@ -1,18 +1,24 @@
 from collections import OrderedDict
 
 
+DEFAULT_PAGINATION_DEPTH = 10000
+RESULT_SIZE_DEFAULT = 25
+RESULT_SIZE_OPTIONS = [10, 50, 100]
+
 PARAMS = {
     "format": "default",
     "field": "complaint_what_happened",
     "frm": 0,
+    "search_after": "",
+    "page": 1,
     "no_aggs": False,
     "no_highlight": False,
-    "size": 10,
+    "size": RESULT_SIZE_DEFAULT,
     "sort": "relevance_desc",
 }
 
 # -*- coding: utf-8 -*-
-DELIMITER = u'\u2022'
+DELIMITER = '\u2022'
 
 SOURCE_FIELDS = (
     "company",

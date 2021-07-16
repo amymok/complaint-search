@@ -1,15 +1,11 @@
 from django.conf import settings
 
 import mock
-from elasticsearch import TransportError
+from elasticsearch7 import TransportError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-
-try:
-    from django.urls import reverse
-except ImportError:
-    from django.core.urlresolvers import reverse
+from django.urls import reverse
 
 
 class SuggestCompanyTests(APITestCase):
@@ -27,7 +23,7 @@ class SuggestCompanyTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         mock_essuggest.assert_not_called()
         self.assertDictEqual(
-            {'text': [u'This field is required.']},
+            {'text': ['This field is required.']},
             response.data)
 
     @mock.patch('complaint_search.es_interface.filter_suggest')
@@ -48,9 +44,10 @@ class SuggestCompanyTests(APITestCase):
             frm=0,
             no_aggs=False,
             no_highlight=False,
-            size=10,
+            page=1,
+            size=25,
             sort='relevance_desc',
-            text=u'BA'
+            text='BA'
         )
         self.assertEqual('OK', response.data)
 

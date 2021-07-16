@@ -25,7 +25,10 @@ def load(shortName):
 # -------------------------------------------------------------------------
 
 def assertBodyEqual(expected, actual):
-    diff = DeepDiff(expected, actual)
+    diff = DeepDiff(actual, expected)
+    # print("***Actual*****", actual, "/n**********\n")
+    # print("***Expected*****", expected, "/n**********\n")
+    # print("***Diff****", diff, "/n**********\n")
     if diff:  # pragma: no cover
         print(json.dumps(json.loads(diff.to_json()), indent=2, sort_keys=True))
         raise AssertionError('Request bodies do not match')

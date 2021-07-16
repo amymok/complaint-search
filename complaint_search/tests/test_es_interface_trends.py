@@ -3,7 +3,7 @@ from django.test import TestCase
 import mock
 from complaint_search.es_interface import trends
 from complaint_search.tests.es_interface_test_helpers import load
-from elasticsearch import Elasticsearch
+from elasticsearch7 import Elasticsearch
 
 
 class EsInterfaceTest_Trends(TestCase):
@@ -22,7 +22,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(**trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(body, res)
 
@@ -43,7 +42,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(**trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(body, res)
 
@@ -65,7 +63,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(agg_exclude=['zip_code'], **trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(body, res)
 
@@ -87,7 +84,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(**trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(body, res)
 
@@ -107,7 +103,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(**trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertEqual(body, res)
         self.assertTrue('company' not in res['aggregations'])
@@ -129,7 +124,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(default_exclude, **trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertTrue('company' in res['aggregations'])
 
@@ -151,7 +145,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(default_exclude, **trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertFalse('company' in res['aggregations'])
         self.assertEqual(len(res['aggregations']['issue']['issue']['buckets']),
@@ -176,7 +169,6 @@ class EsInterfaceTest_Trends(TestCase):
 
         res = trends(default_exclude, **trends_params)
         self.assertEqual(len(mock_search.call_args), 2)
-        self.assertEqual(mock_search.call_args[1]['doc_type'], 'DOC_TYPE')
         self.assertEqual(mock_search.call_args[1]['index'], 'INDEX')
         self.assertTrue('company' in res['aggregations'])
         self.assertEqual(len(res['aggregations']['issue']['issue']['buckets']),
